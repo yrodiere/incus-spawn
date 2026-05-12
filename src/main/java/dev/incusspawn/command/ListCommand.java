@@ -1786,7 +1786,7 @@ public class ListCommand implements Runnable {
         var allTools = new ArrayList<String>();
         for (var def : chain) {
             for (var toolRef : def.getTools()) {
-                allTools.add(toolRef.getName());
+                allTools.add(formatToolWithParams(toolRef));
             }
         }
         addDetailSection(lines, "Tools", allTools, labelStyle, lineStyle, dimStyle);
@@ -1858,6 +1858,17 @@ public class ListCommand implements Runnable {
         }
         allDeps.removeAll(explicit);
         return new ArrayList<>(allDeps);
+    }
+
+    private String formatToolWithParams(dev.incusspawn.config.ImageDef.ToolRef toolRef) {
+        if (toolRef.getParams().isEmpty()) {
+            return toolRef.getName();
+        }
+        var paramStr = toolRef.getParams().entrySet().stream()
+            .sorted(java.util.Map.Entry.comparingByKey())
+            .map(e -> e.getKey() + ": " + e.getValue())
+            .collect(java.util.stream.Collectors.joining(", "));
+        return toolRef.getName() + " (" + paramStr + ")";
     }
 
     private static java.nio.file.Path resolveHostRepoMatch(String cloneUrl, SpawnConfig config) {
@@ -2030,7 +2041,10 @@ public class ListCommand implements Runnable {
                 var toolNames = def.getTools().stream()
                     .map(dev.incusspawn.config.ImageDef.ToolRef::getName)
                     .collect(java.util.stream.Collectors.toList());
-                toolSpans.add(Span.styled(String.join(", ", toolNames), lineStyle));
+                var toolDisplay = def.getTools().stream()
+                    .map(this::formatToolWithParams)
+                    .collect(java.util.stream.Collectors.toList());
+                toolSpans.add(Span.styled(String.join(", ", toolDisplay), lineStyle));
                 var levelAutoDeps = collectAutoDeps(toolNames);
                 if (!levelAutoDeps.isEmpty()) {
                     toolSpans.add(Span.styled("  (+" + String.join(", ", levelAutoDeps) + ")", dimStyle));
