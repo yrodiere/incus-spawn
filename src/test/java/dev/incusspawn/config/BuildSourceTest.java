@@ -131,7 +131,7 @@ class BuildSourceTest {
         var tool = new ToolDef();
         tool.setName("maven-3");
         tool.setPackages(List.of("maven"));
-        tool.setRequires(List.of("java-sdk"));
+        tool.setRequires(List.of(new ToolDef.ToolRef("java-sdk")));
 
         var depTool = new ToolDef();
         depTool.setName("java-sdk");
@@ -147,7 +147,8 @@ class BuildSourceTest {
 
         assertNotNull(restored);
         assertEquals(2, restored.getTools().size());
-        assertEquals(List.of("java-sdk"), restored.getTools().get("maven-3").getRequires());
+        assertEquals(1, restored.getTools().get("maven-3").getRequires().size());
+        assertEquals("java-sdk", restored.getTools().get("maven-3").getRequires().get(0).getName());
     }
 
     @Test

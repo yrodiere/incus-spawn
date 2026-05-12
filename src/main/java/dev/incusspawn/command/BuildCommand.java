@@ -493,7 +493,18 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
     private void resolveWithDeps(String name, Map<String, String> params,
                                   java.util.LinkedHashMap<String, ResolvedTool> resolved,
                                   java.util.LinkedHashSet<String> visiting, java.util.Set<String> explicit) {
-        if (resolved.containsKey(name)) return;
+        // Check if tool already resolved - if parameters differ, that's an error
+        if (resolved.containsKey(name)) {
+            var existing = resolved.get(name);
+            if (!existing.parameters().equals(params)) {
+                throw new IllegalArgumentException(
+                    "Tool '" + name + "' specified multiple times with different parameters:\n" +
+                    "  First:  " + existing.parameters() + "\n" +
+                    "  Second: " + params
+                );
+            }
+            return;
+        }
         if (!visiting.add(name)) {
             System.err.println("Warning: dependency cycle detected: " +
                     String.join(" -> ", visiting) + " -> " + name + ", skipping.");
@@ -527,12 +538,22 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
             resolvedParams = validation.resolvedValues();
         }
 
-        // Recursively resolve dependencies (without parameters - they use defaults)
-        for (var dep : tool.requires()) {
-            if (!explicit.contains(dep)) {
-                System.out.println("  Auto-adding dependency: " + dep + " (required by " + name + ")");
+        // Recursively resolve dependencies with their parameters
+        if (tool instanceof dev.incusspawn.tool.YamlToolSetup yts) {
+            for (var depRef : yts.toolDef().getRequires()) {
+                if (!explicit.contains(depRef.getName())) {
+                    System.out.println("  Auto-adding dependency: " + depRef.getName() + " (required by " + name + ")");
+                }
+                resolveWithDeps(depRef.getName(), depRef.getParams(), resolved, visiting, explicit);
             }
-            resolveWithDeps(dep, Map.of(), resolved, visiting, explicit);
+        } else {
+            // Java tools don't have parameterized requires
+            for (var dep : tool.requires()) {
+                if (!explicit.contains(dep)) {
+                    System.out.println("  Auto-adding dependency: " + dep + " (required by " + name + ")");
+                }
+                resolveWithDeps(dep, Map.of(), resolved, visiting, explicit);
+            }
         }
 
         resolved.put(name, new ResolvedTool(name, tool, resolvedParams));
@@ -663,7 +684,11 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
         for (var resolvedTool : resolveTools(imageDef)) {
             if (resolvedTool.setup() instanceof YamlToolSetup yts) {
                 rawFps.put(yts.toolDef().getName(), yts.toolDef().contentFingerprint());
-                depMap.put(yts.toolDef().getName(), yts.toolDef().getRequires());
+                // Convert ToolRef list to String list for compositeFingerprints
+                var depNames = yts.toolDef().getRequires().stream()
+                    .map(dev.incusspawn.tool.ToolDef.ToolRef::getName)
+                    .toList();
+                depMap.put(yts.toolDef().getName(), depNames);
             }
         }
         return dev.incusspawn.tool.ToolDef.compositeFingerprints(rawFps, depMap);
@@ -715,8 +740,8 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
             tools.put(name, yts.toolDef());
             var deps = yts.toolDef().getRequires();
             if (deps != null) {
-                for (var dep : deps) {
-                    collectToolDefRecursive(dep, tools, visited);
+                for (var depRef : deps) {
+                    collectToolDefRecursive(depRef.getName(), tools, visited);
                 }
             }
         }

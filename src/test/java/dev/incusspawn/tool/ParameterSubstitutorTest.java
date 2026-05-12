@@ -95,7 +95,7 @@ class ParameterSubstitutorTest {
         var original = new ToolDef();
         original.setName("test-tool");
         original.setPackages(List.of("pkg1", "pkg2"));
-        original.setRequires(List.of("dep1"));
+        original.setRequires(List.of(new ToolDef.ToolRef("dep1")));
 
         var substituted = substitutor.substitute(original);
 

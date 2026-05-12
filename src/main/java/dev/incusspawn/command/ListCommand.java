@@ -2349,11 +2349,15 @@ public class ListCommand implements Runnable {
         if (!visited.add(name)) return;
         var tool = toolDefLoader.find(name);
         if (tool instanceof YamlToolSetup yts) {
-            for (var dep : yts.toolDef().getRequires()) {
-                collectToolFps(dep, rawFps, depMap, visited);
+            for (var depRef : yts.toolDef().getRequires()) {
+                collectToolFps(depRef.getName(), rawFps, depMap, visited);
             }
             rawFps.put(name, yts.toolDef().contentFingerprint());
-            depMap.put(name, yts.toolDef().getRequires());
+            // Convert ToolRef list to String list for depMap
+            var depNames = yts.toolDef().getRequires().stream()
+                .map(dev.incusspawn.tool.ToolDef.ToolRef::getName)
+                .toList();
+            depMap.put(name, depNames);
         }
     }
 

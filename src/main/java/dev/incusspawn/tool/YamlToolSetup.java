@@ -38,7 +38,10 @@ public class YamlToolSetup implements ToolSetup {
 
     @Override
     public java.util.List<String> requires() {
-        return def.getRequires();
+        // Convert ToolRef list to String list for backward compatibility
+        return def.getRequires().stream()
+            .map(ToolDef.ToolRef::getName)
+            .toList();
     }
 
     @Override

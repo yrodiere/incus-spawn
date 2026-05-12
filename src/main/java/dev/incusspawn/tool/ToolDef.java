@@ -2,7 +2,12 @@ package dev.incusspawn.tool;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
@@ -11,10 +16,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
-import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
+import java.util.*;
 
 /**
  * A tool installation defined in YAML. Each definition declares
@@ -36,7 +38,8 @@ public class ToolDef {
     private List<String> runAsUser = List.of();
     private List<FileEntry> files = List.of();
     private List<String> env = List.of();
-    private List<String> requires = List.of();
+    @JsonDeserialize(using = ToolRef.Deserializer.class)
+    private List<ToolRef> requires = List.of();
     private String verify;
     private List<ActionEntry> actions = List.of();
     private Map<String, ParameterDef> parameters = Map.of();
@@ -59,8 +62,8 @@ public class ToolDef {
     public void setFiles(List<FileEntry> files) { this.files = files; }
     public List<String> getEnv() { return env; }
     public void setEnv(List<String> env) { this.env = env; }
-    public List<String> getRequires() { return requires; }
-    public void setRequires(List<String> requires) { this.requires = requires; }
+    public List<ToolRef> getRequires() { return requires; }
+    public void setRequires(List<ToolRef> requires) { this.requires = requires; }
     public String getVerify() { return verify; }
     public void setVerify(String verify) { this.verify = verify; }
     public List<ActionEntry> getActions() { return actions; }
@@ -134,6 +137,86 @@ public class ToolDef {
 
     @RegisterForReflection
     @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ToolRef {
+        private String name;
+        @JsonProperty("params")
+        private Map<String, String> params = Map.of();
+
+        public ToolRef() {}
+
+        public ToolRef(String name) {
+            this.name = name;
+            this.params = Map.of();
+        }
+
+        public ToolRef(String name, Map<String, String> params) {
+            this.name = name;
+            this.params = params != null ? params : Map.of();
+        }
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public Map<String, String> getParams() { return params; }
+        public void setParams(Map<String, String> params) {
+            this.params = params != null ? params : Map.of();
+        }
+
+        public static class Deserializer extends StdDeserializer<List<ToolRef>> {
+            public Deserializer() { super(List.class); }
+
+            @Override
+            public List<ToolRef> deserialize(JsonParser p, DeserializationContext ctxt)
+                    throws IOException {
+                var result = new ArrayList<ToolRef>();
+
+                if (p.currentToken() != JsonToken.START_ARRAY) {
+                    throw new IOException("Expected array for requires field");
+                }
+
+                while (p.nextToken() != JsonToken.END_ARRAY) {
+                    if (p.currentToken() == JsonToken.VALUE_STRING) {
+                        // Simple string form: "maven-3"
+                        result.add(new ToolRef(p.getText()));
+                    } else if (p.currentToken() == JsonToken.START_OBJECT) {
+                        // Object form: { name: "tool", param1: "value1", ... }
+                        String name = null;
+                        Map<String, String> params = new LinkedHashMap<>();
+
+                        while (p.nextToken() != JsonToken.END_OBJECT) {
+                            var field = p.currentName();
+                            p.nextToken();
+                            if ("name".equals(field)) {
+                                name = p.getText();
+                            } else if ("params".equals(field)) {
+                                // Handle nested params object (from JSON serialization)
+                                if (p.currentToken() == JsonToken.START_OBJECT) {
+                                    while (p.nextToken() != JsonToken.END_OBJECT) {
+                                        var paramName = p.currentName();
+                                        p.nextToken();
+                                        params.put(paramName, p.getValueAsString());
+                                    }
+                                }
+                            } else {
+                                // All other fields are parameters (flat form)
+                                params.put(field, p.getValueAsString());
+                            }
+                        }
+
+                        if (name != null) {
+                            result.add(new ToolRef(name, params));
+                        } else {
+                            throw new IOException("Tool object in requires must have a 'name' field");
+                        }
+                    }
+                }
+
+                return result;
+            }
+        }
+    }
+
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ParameterDef {
         private String type;  // "string", "integer", "boolean", "enum"
         @JsonProperty("default")
@@ -178,7 +261,15 @@ public class ToolDef {
                     .append(',').append(f.owner).append('\n');
         }
         env.stream().sorted().forEach(e -> sb.append("env=").append(e).append('\n'));
-        requires.stream().sorted().forEach(r -> sb.append("requires=").append(r).append('\n'));
+        for (var r : requires.stream().sorted(Comparator.comparing(ToolRef::getName)).toList()) {
+            sb.append("requires=").append(r.getName());
+            if (!r.getParams().isEmpty()) {
+                r.getParams().entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(e -> sb.append(',').append(e.getKey()).append('=').append(e.getValue()));
+            }
+            sb.append('\n');
+        }
         if (verify != null) sb.append("verify=").append(verify).append('\n');
         parameters.entrySet().stream()
                 .sorted(java.util.Map.Entry.comparingByKey())
