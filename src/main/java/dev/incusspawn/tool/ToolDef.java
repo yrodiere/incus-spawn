@@ -39,6 +39,7 @@ public class ToolDef {
     private List<String> requires = List.of();
     private String verify;
     private List<ActionEntry> actions = List.of();
+    private Map<String, ParameterDef> parameters = Map.of();
 
     private transient volatile String cachedFingerprint;
 
@@ -64,6 +65,10 @@ public class ToolDef {
     public void setVerify(String verify) { this.verify = verify; }
     public List<ActionEntry> getActions() { return actions; }
     public void setActions(List<ActionEntry> actions) { this.actions = actions; }
+    public Map<String, ParameterDef> getParameters() { return parameters; }
+    public void setParameters(Map<String, ParameterDef> parameters) {
+        this.parameters = parameters != null ? parameters : Map.of();
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class DownloadEntry {
@@ -127,6 +132,34 @@ public class ToolDef {
         public void setAutoReturn(boolean autoReturn) { this.autoReturn = autoReturn; }
     }
 
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ParameterDef {
+        private String type;  // "string", "integer", "boolean", "enum"
+        @JsonProperty("default")
+        private String defaultValue;
+        private String description;
+        private String pattern;  // regex for string validation
+        private Integer min;     // for integer type
+        private Integer max;     // for integer type
+        private List<String> options = List.of();  // for enum type
+
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public String getDefault() { return defaultValue; }
+        public void setDefault(String defaultValue) { this.defaultValue = defaultValue; }
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
+        public String getPattern() { return pattern; }
+        public void setPattern(String pattern) { this.pattern = pattern; }
+        public Integer getMin() { return min; }
+        public void setMin(Integer min) { this.min = min; }
+        public Integer getMax() { return max; }
+        public void setMax(Integer max) { this.max = max; }
+        public List<String> getOptions() { return options; }
+        public void setOptions(List<String> options) { this.options = options; }
+    }
+
     public String contentFingerprint() {
         var result = cachedFingerprint;
         if (result != null) return result;
@@ -147,6 +180,21 @@ public class ToolDef {
         env.stream().sorted().forEach(e -> sb.append("env=").append(e).append('\n'));
         requires.stream().sorted().forEach(r -> sb.append("requires=").append(r).append('\n'));
         if (verify != null) sb.append("verify=").append(verify).append('\n');
+        parameters.entrySet().stream()
+                .sorted(java.util.Map.Entry.comparingByKey())
+                .forEach(e -> {
+                    var p = e.getValue();
+                    sb.append("param=").append(e.getKey()).append(',')
+                      .append(p.getType()).append(',')
+                      .append(p.getDefault()).append(',')
+                      .append(p.getPattern()).append(',')
+                      .append(p.getMin()).append(',')
+                      .append(p.getMax()).append(',');
+                    if (p.getOptions() != null && !p.getOptions().isEmpty()) {
+                        p.getOptions().stream().sorted().forEach(opt -> sb.append(opt).append(';'));
+                    }
+                    sb.append('\n');
+                });
         result = sha256hex(sb.toString());
         cachedFingerprint = result;
         return result;

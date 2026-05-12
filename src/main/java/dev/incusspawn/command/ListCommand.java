@@ -1784,7 +1784,11 @@ public class ListCommand implements Runnable {
 
         // Collect all tools
         var allTools = new ArrayList<String>();
-        for (var def : chain) allTools.addAll(def.getTools());
+        for (var def : chain) {
+            for (var toolRef : def.getTools()) {
+                allTools.add(toolRef.getName());
+            }
+        }
         addDetailSection(lines, "Tools", allTools, labelStyle, lineStyle, dimStyle);
 
         // Collect auto-added dependencies (transitive requires not already in explicit list)
@@ -1939,7 +1943,9 @@ public class ListCommand implements Runnable {
         if (parent == null || parent.isEmpty() || "-".equals(parent)) return tools;
         var chain = getInheritanceChain(parent);
         for (var def : chain) {
-            tools.addAll(def.getTools());
+            for (var toolRef : def.getTools()) {
+                tools.add(toolRef.getName());
+            }
         }
         // Add transitive deps
         var allDeps = new java.util.LinkedHashSet<String>();
@@ -2021,8 +2027,11 @@ public class ListCommand implements Runnable {
             if (!def.getTools().isEmpty()) {
                 var toolSpans = new ArrayList<Span>();
                 toolSpans.add(Span.styled(contentIndent + "Tools: ", labelStyle));
-                toolSpans.add(Span.styled(String.join(", ", def.getTools()), lineStyle));
-                var levelAutoDeps = collectAutoDeps(def.getTools());
+                var toolNames = def.getTools().stream()
+                    .map(dev.incusspawn.config.ImageDef.ToolRef::getName)
+                    .collect(java.util.stream.Collectors.toList());
+                toolSpans.add(Span.styled(String.join(", ", toolNames), lineStyle));
+                var levelAutoDeps = collectAutoDeps(toolNames);
                 if (!levelAutoDeps.isEmpty()) {
                     toolSpans.add(Span.styled("  (+" + String.join(", ", levelAutoDeps) + ")", dimStyle));
                 }
@@ -2327,8 +2336,8 @@ public class ListCommand implements Runnable {
         var depMap = new java.util.TreeMap<String, java.util.List<String>>();
         var visited = new java.util.HashSet<String>();
         for (var def : imageDefs.values()) {
-            for (var toolName : def.getTools()) {
-                collectToolFps(toolName, rawFps, depMap, visited);
+            for (var toolRef : def.getTools()) {
+                collectToolFps(toolRef.getName(), rawFps, depMap, visited);
             }
         }
         return dev.incusspawn.tool.ToolDef.compositeFingerprints(rawFps, depMap);

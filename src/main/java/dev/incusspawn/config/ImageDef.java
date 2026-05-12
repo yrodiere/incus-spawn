@@ -59,6 +59,10 @@ public class ImageDef {
         return YAML.readValue(file.toFile(), ImageDef.class);
     }
 
+    public static ImageDef parseYaml(String yaml) throws IOException {
+        return YAML.readValue(yaml, ImageDef.class);
+    }
+
     /**
      * Derive the YAML filename from a template name (e.g. {@code tpl-java} -> {@code java.yaml}).
      */
@@ -71,7 +75,8 @@ public class ImageDef {
     private String image = "images:fedora/43";
     private String parent;
     private List<String> packages = List.of();
-    private List<String> tools = List.of();
+    @JsonDeserialize(using = ToolRef.Deserializer.class)
+    private List<ToolRef> tools = List.of();
     private List<RepoEntry> repos = List.of();
     @JsonDeserialize(using = SkillsDef.Deserializer.class)
     private SkillsDef skills = SkillsDef.EMPTY;
@@ -92,8 +97,8 @@ public class ImageDef {
     public void setParent(String parent) { this.parent = parent; }
     public List<String> getPackages() { return packages; }
     public void setPackages(List<String> packages) { this.packages = packages; }
-    public List<String> getTools() { return tools; }
-    public void setTools(List<String> tools) { this.tools = tools; }
+    public List<ToolRef> getTools() { return tools; }
+    public void setTools(List<ToolRef> tools) { this.tools = tools; }
     public List<RepoEntry> getRepos() { return repos; }
     public void setRepos(List<RepoEntry> repos) { this.repos = repos; }
     public SkillsDef getSkills() { return skills; }
@@ -193,6 +198,87 @@ public class ImageDef {
         public void setPrime(String prime) { this.prime = prime; }
     }
 
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ToolRef {
+        private String name;
+        @JsonProperty("params")
+        private Map<String, String> params = Map.of();
+
+        public ToolRef() {}
+
+        public ToolRef(String name) {
+            this.name = name;
+            this.params = Map.of();
+        }
+
+        public ToolRef(String name, Map<String, String> params) {
+            this.name = name;
+            this.params = params != null ? params : Map.of();
+        }
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public Map<String, String> getParams() { return params; }
+        public void setParams(Map<String, String> params) {
+            this.params = params != null ? params : Map.of();
+        }
+
+        public static class Deserializer extends StdDeserializer<List<ToolRef>> {
+            public Deserializer() { super(List.class); }
+
+            @Override
+            public List<ToolRef> deserialize(JsonParser p, DeserializationContext ctxt)
+                    throws IOException {
+                var result = new ArrayList<ToolRef>();
+
+                if (p.currentToken() != JsonToken.START_ARRAY) {
+                    throw new IOException("Expected array for tools field");
+                }
+
+                while (p.nextToken() != JsonToken.END_ARRAY) {
+                    if (p.currentToken() == JsonToken.VALUE_STRING) {
+                        // Simple string form: "maven-3"
+                        result.add(new ToolRef(p.getText()));
+                    } else if (p.currentToken() == JsonToken.START_OBJECT) {
+                        // Object form: { name: "idea-backend", memory: "8g", ... }
+                        // All fields except 'name' are treated as parameters
+                        String name = null;
+                        Map<String, String> params = new LinkedHashMap<>();
+
+                        while (p.nextToken() != JsonToken.END_OBJECT) {
+                            var field = p.currentName();
+                            p.nextToken();
+                            if ("name".equals(field)) {
+                                name = p.getText();
+                            } else if ("params".equals(field)) {
+                                // Handle nested params object (from JSON serialization)
+                                if (p.currentToken() == JsonToken.START_OBJECT) {
+                                    while (p.nextToken() != JsonToken.END_OBJECT) {
+                                        var paramName = p.currentName();
+                                        p.nextToken();
+                                        params.put(paramName, p.getValueAsString());
+                                    }
+                                }
+                            } else {
+                                // All other fields are parameters (flat form)
+                                params.put(field, p.getValueAsString());
+                            }
+                        }
+
+                        if (name != null) {
+                            result.add(new ToolRef(name, params));
+                        } else {
+                            throw new IOException("Tool object must have a 'name' field");
+                        }
+                    }
+                }
+
+                return result;
+            }
+        }
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class HostResource {
         private String source;
@@ -220,10 +306,16 @@ public class ImageDef {
         sb.append("image=").append(image).append('\n');
         sb.append("parent=").append(parent != null ? parent : "").append('\n');
         packages.stream().sorted().forEach(p -> sb.append("pkg=").append(p).append('\n'));
-        for (var t : tools.stream().sorted().toList()) {
-            sb.append("tool=").append(t);
-            var fp = toolFingerprints.get(t);
+        for (var t : tools.stream().sorted(java.util.Comparator.comparing(ToolRef::getName)).toList()) {
+            sb.append("tool=").append(t.getName());
+            var fp = toolFingerprints.get(t.getName());
             if (fp != null && !fp.isEmpty()) sb.append(':').append(fp);
+            // Include parameter values in fingerprint
+            if (!t.getParams().isEmpty()) {
+                t.getParams().entrySet().stream()
+                    .sorted(java.util.Map.Entry.comparingByKey())
+                    .forEach(e -> sb.append(',').append(e.getKey()).append('=').append(e.getValue()));
+            }
             sb.append('\n');
         }
         repos.stream()

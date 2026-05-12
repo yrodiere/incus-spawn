@@ -470,17 +470,28 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
      * Resolve all tools referenced by the image definition, including
      * transitive dependencies declared via {@code requires}.
      */
-    private java.util.List<ToolSetup> resolveTools(ImageDef imageDef) {
-        var explicit = new java.util.LinkedHashSet<String>(imageDef.getTools());
-        var resolved = new java.util.LinkedHashMap<String, ToolSetup>();
+    private record ResolvedTool(
+        String name,
+        ToolSetup setup,
+        Map<String, String> parameters
+    ) {}
 
-        for (var toolName : imageDef.getTools()) {
-            resolveWithDeps(toolName, resolved, new java.util.LinkedHashSet<>(), explicit);
+    private java.util.List<ResolvedTool> resolveTools(ImageDef imageDef) {
+        var explicit = new java.util.LinkedHashSet<String>();
+        for (var toolRef : imageDef.getTools()) {
+            explicit.add(toolRef.getName());
+        }
+        var resolved = new java.util.LinkedHashMap<String, ResolvedTool>();
+
+        for (var toolRef : imageDef.getTools()) {
+            resolveWithDeps(toolRef.getName(), toolRef.getParams(), resolved,
+                new java.util.LinkedHashSet<>(), explicit);
         }
         return new java.util.ArrayList<>(resolved.values());
     }
 
-    private void resolveWithDeps(String name, java.util.LinkedHashMap<String, ToolSetup> resolved,
+    private void resolveWithDeps(String name, Map<String, String> params,
+                                  java.util.LinkedHashMap<String, ResolvedTool> resolved,
                                   java.util.LinkedHashSet<String> visiting, java.util.Set<String> explicit) {
         if (resolved.containsKey(name)) return;
         if (!visiting.add(name)) {
@@ -494,13 +505,37 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
             visiting.remove(name);
             return;
         }
+
+        // Resolve parameters and validate
+        Map<String, String> resolvedParams = params != null ? params : Map.of();
+        if (tool instanceof dev.incusspawn.tool.YamlToolSetup yts && !yts.toolDef().getParameters().isEmpty()) {
+            var validation = dev.incusspawn.tool.ParameterResolver.resolve(
+                yts.toolDef().getParameters(), resolvedParams);
+            if (validation.hasErrors()) {
+                System.err.println("Error in tool '" + name + "' parameters:");
+                for (var error : validation.errors()) {
+                    System.err.println("  " + error);
+                }
+                visiting.remove(name);
+                return;
+            }
+            if (validation.hasWarnings()) {
+                for (var warning : validation.warnings()) {
+                    System.out.println("Warning: " + warning);
+                }
+            }
+            resolvedParams = validation.resolvedValues();
+        }
+
+        // Recursively resolve dependencies (without parameters - they use defaults)
         for (var dep : tool.requires()) {
             if (!explicit.contains(dep)) {
                 System.out.println("  Auto-adding dependency: " + dep + " (required by " + name + ")");
             }
-            resolveWithDeps(dep, resolved, visiting, explicit);
+            resolveWithDeps(dep, Map.of(), resolved, visiting, explicit);
         }
-        resolved.put(name, tool);
+
+        resolved.put(name, new ResolvedTool(name, tool, resolvedParams));
         visiting.remove(name);
     }
 
@@ -510,11 +545,11 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
      * only the remaining packages.
      */
     private void installAllPackages(Container container, ImageDef imageDef,
-                                    java.util.List<ToolSetup> tools,
+                                    java.util.List<ResolvedTool> tools,
                                     Map<String, ImageDef> defs) {
         var allPackages = new java.util.LinkedHashSet<>(imageDef.getPackages());
         for (var tool : tools) {
-            allPackages.addAll(tool.packages());
+            allPackages.addAll(tool.setup().packages());
         }
         if (allPackages.isEmpty()) return;
 
@@ -526,7 +561,7 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
             if (parentDef == null) break;
             ancestorPackages.addAll(parentDef.getPackages());
             for (var tool : resolveTools(parentDef)) {
-                ancestorPackages.addAll(tool.packages());
+                ancestorPackages.addAll(tool.setup().packages());
             }
             parentName = parentDef.getParent();
         }
@@ -551,9 +586,18 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
     /**
      * Run the non-package setup steps for each tool (scripts, files, env, verify).
      */
-    private void runToolSetup(Container container, java.util.List<ToolSetup> tools) {
-        for (var tool : tools) {
-            tool.install(container);
+    private void runToolSetup(Container container, java.util.List<ResolvedTool> tools) {
+        for (var resolved : tools) {
+            // Apply parameter substitution if needed
+            if (resolved.setup() instanceof dev.incusspawn.tool.YamlToolSetup yts
+                    && !resolved.parameters().isEmpty()) {
+                var substitutor = new dev.incusspawn.tool.ParameterSubstitutor(resolved.parameters());
+                var substituted = substitutor.substitute(yts.toolDef());
+                var parameterizedSetup = new dev.incusspawn.tool.YamlToolSetup(substituted);
+                parameterizedSetup.install(container);
+            } else {
+                resolved.setup().install(container);
+            }
         }
     }
 
@@ -616,8 +660,8 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
     private java.util.Map<String, String> computeToolFingerprints(dev.incusspawn.config.ImageDef imageDef) {
         var rawFps = new java.util.TreeMap<String, String>();
         var depMap = new java.util.TreeMap<String, java.util.List<String>>();
-        for (var tool : resolveTools(imageDef)) {
-            if (tool instanceof YamlToolSetup yts) {
+        for (var resolvedTool : resolveTools(imageDef)) {
+            if (resolvedTool.setup() instanceof YamlToolSetup yts) {
                 rawFps.put(yts.toolDef().getName(), yts.toolDef().contentFingerprint());
                 depMap.put(yts.toolDef().getName(), yts.toolDef().getRequires());
             }
@@ -628,6 +672,7 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
     private BuildSource collectBuildSource(ImageDef imageDef, Map<String, ImageDef> defs) {
         var definitions = new java.util.LinkedHashMap<String, ImageDef>();
         var tools = new java.util.LinkedHashMap<String, dev.incusspawn.tool.ToolDef>();
+        var toolInstances = new java.util.LinkedHashMap<String, BuildSource.ToolInstance>();
         var sources = new java.util.LinkedHashMap<String, String>();
 
         var visited = new java.util.HashSet<String>();
@@ -636,19 +681,29 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
             definitions.put(current.getName(), current);
             sources.put(current.getName(), current.getSource());
             collectToolDefs(current, tools, visited);
+            collectToolInstances(current, toolInstances);
             if (current.isRoot()) break;
             current = defs.get(current.getParent());
         }
 
-        return new BuildSource(definitions, tools, sources);
+        return new BuildSource(definitions, tools, toolInstances, sources);
+    }
+
+    private void collectToolInstances(ImageDef imageDef, Map<String, BuildSource.ToolInstance> instances) {
+        for (var resolvedTool : resolveTools(imageDef)) {
+            if (!resolvedTool.parameters().isEmpty()) {
+                instances.put(resolvedTool.name(),
+                    new BuildSource.ToolInstance(resolvedTool.name(), resolvedTool.parameters()));
+            }
+        }
     }
 
     private void collectToolDefs(ImageDef imageDef, Map<String, dev.incusspawn.tool.ToolDef> tools,
                                   java.util.Set<String> visited) {
-        var toolNames = imageDef.getTools();
-        if (toolNames == null) return;
-        for (var toolName : toolNames) {
-            collectToolDefRecursive(toolName, tools, visited);
+        var toolRefs = imageDef.getTools();
+        if (toolRefs == null) return;
+        for (var toolRef : toolRefs) {
+            collectToolDefRecursive(toolRef.getName(), tools, visited);
         }
     }
 
