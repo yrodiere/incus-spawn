@@ -5,9 +5,13 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.incusspawn.config.ImageDef;
 import dev.incusspawn.incus.Container;
 import dev.incusspawn.incus.IncusClient;
+import dev.incusspawn.tool.ToolDefLoader;
+import dev.incusspawn.tool.ToolSetup;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.Iterator;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -623,5 +627,95 @@ class BuildCommandTest {
 
         assertTrue(BuildCommand.isImageOutdated("tpl-test", imageDef, incus, toolDefLoader, defs, false),
                 "Image with changed definition should be outdated");
+    }
+
+    // --- resolveTools ---
+
+    @Test
+    void resolveToolsFindsCdiTools() {
+        var cdiTool = new ToolSetup() {
+            @Override public String name() { return "gh"; }
+            @Override public void install(Container container) {}
+        };
+
+        @SuppressWarnings("unchecked")
+        var toolSetups = mock(Instance.class);
+        when(toolSetups.iterator()).thenReturn((Iterator) List.of(cdiTool).iterator());
+
+        var toolDefLoader = mock(ToolDefLoader.class);
+        when(toolDefLoader.find("gh")).thenReturn(null);
+
+        var cmd = new BuildCommand();
+        cmd.toolDefLoader = toolDefLoader;
+        cmd.toolSetups = toolSetups;
+
+        var imageDef = new ImageDef();
+        imageDef.setName("tpl-test");
+        imageDef.setTools(List.of("gh"));
+
+        var resolved = cmd.resolveTools(imageDef);
+        assertEquals(1, resolved.size(), "CDI tool 'gh' should be resolved");
+        assertEquals("gh", resolved.get(0).name());
+    }
+
+    @Test
+    void resolveToolsFindsYamlTools() {
+        var yamlTool = new ToolSetup() {
+            @Override public String name() { return "podman"; }
+            @Override public void install(Container container) {}
+        };
+
+        @SuppressWarnings("unchecked")
+        var toolSetups = mock(Instance.class);
+        when(toolSetups.iterator()).thenReturn((Iterator) List.of().iterator());
+
+        var toolDefLoader = mock(ToolDefLoader.class);
+        when(toolDefLoader.find("podman")).thenReturn(yamlTool);
+
+        var cmd = new BuildCommand();
+        cmd.toolDefLoader = toolDefLoader;
+        cmd.toolSetups = toolSetups;
+
+        var imageDef = new ImageDef();
+        imageDef.setName("tpl-test");
+        imageDef.setTools(List.of("podman"));
+
+        var resolved = cmd.resolveTools(imageDef);
+        assertEquals(1, resolved.size(), "YAML tool 'podman' should be resolved");
+        assertEquals("podman", resolved.get(0).name());
+    }
+
+    @Test
+    void resolveToolsFindsMixOfYamlAndCdiTools() {
+        var cdiTool = new ToolSetup() {
+            @Override public String name() { return "claude"; }
+            @Override public void install(Container container) {}
+        };
+        var yamlTool = new ToolSetup() {
+            @Override public String name() { return "sshd"; }
+            @Override public void install(Container container) {}
+        };
+
+        @SuppressWarnings("unchecked")
+        var toolSetups = mock(Instance.class);
+        when(toolSetups.iterator()).thenReturn((Iterator) List.of(cdiTool).iterator());
+
+        var toolDefLoader = mock(ToolDefLoader.class);
+        when(toolDefLoader.find("claude")).thenReturn(null);
+        when(toolDefLoader.find("sshd")).thenReturn(yamlTool);
+
+        var cmd = new BuildCommand();
+        cmd.toolDefLoader = toolDefLoader;
+        cmd.toolSetups = toolSetups;
+
+        var imageDef = new ImageDef();
+        imageDef.setName("tpl-test");
+        imageDef.setTools(List.of("sshd", "claude"));
+
+        var resolved = cmd.resolveTools(imageDef);
+        assertEquals(2, resolved.size(), "Both YAML and CDI tools should be resolved");
+        var names = resolved.stream().map(ToolSetup::name).toList();
+        assertTrue(names.contains("sshd"), "YAML tool 'sshd' should be present");
+        assertTrue(names.contains("claude"), "CDI tool 'claude' should be present");
     }
 }

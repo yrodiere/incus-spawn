@@ -692,8 +692,14 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
      * Resolve all tools referenced by the image definition, including
      * transitive dependencies declared via {@code requires}.
      */
-    private java.util.List<ToolSetup> resolveTools(ImageDef imageDef) {
-        return resolveTools(imageDef, toolDefLoader, false);
+    java.util.List<ToolSetup> resolveTools(ImageDef imageDef) {
+        var explicit = new java.util.LinkedHashSet<String>(imageDef.getTools());
+        var resolved = new java.util.LinkedHashMap<String, ToolSetup>();
+
+        for (var toolName : imageDef.getTools()) {
+            resolveWithDeps(toolName, resolved, new java.util.LinkedHashSet<>(), explicit);
+        }
+        return new java.util.ArrayList<>(resolved.values());
     }
 
     private static java.util.List<ToolSetup> resolveTools(ImageDef imageDef, ToolDefLoader toolDefLoader, boolean quiet) {
@@ -708,7 +714,26 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
 
     private void resolveWithDeps(String name, java.util.LinkedHashMap<String, ToolSetup> resolved,
                                   java.util.LinkedHashSet<String> visiting, java.util.Set<String> explicit) {
-        resolveWithDeps(name, resolved, visiting, explicit, toolDefLoader, false);
+        if (resolved.containsKey(name)) return;
+        if (!visiting.add(name)) {
+            System.err.println("Warning: dependency cycle detected: " +
+                    String.join(" -> ", visiting) + " -> " + name + ", skipping.");
+            return;
+        }
+        var tool = findTool(name);
+        if (tool == null) {
+            System.err.println("Warning: unknown tool '" + name + "', skipping.");
+            visiting.remove(name);
+            return;
+        }
+        for (var dep : tool.requires()) {
+            if (!explicit.contains(dep)) {
+                System.out.println("  Auto-adding dependency: " + dep + " (required by " + name + ")");
+            }
+            resolveWithDeps(dep, resolved, visiting, explicit);
+        }
+        resolved.put(name, tool);
+        visiting.remove(name);
     }
 
     private static void resolveWithDeps(String name, java.util.LinkedHashMap<String, ToolSetup> resolved,
