@@ -507,35 +507,27 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
 
         // Resolve parameters and validate
         Map<String, String> resolvedParams = params != null ? params : Map.of();
-        if (tool instanceof dev.incusspawn.tool.YamlToolSetup yts) {
-            if (!yts.toolDef().getParameters().isEmpty()) {
-                var validation = dev.incusspawn.tool.ParameterResolver.resolve(
-                    yts.toolDef().getParameters(), resolvedParams);
-                if (validation.hasErrors()) {
-                    throw new IllegalArgumentException(
-                        "Error in tool '" + name + "' parameters:\n" +
-                        String.join("\n", validation.errors().stream().map(e -> "  " + e).toList())
-                    );
-                }
-                if (validation.hasWarnings()) {
-                    for (var warning : validation.warnings()) {
-                        System.out.println("Warning: " + warning);
-                    }
-                }
-                resolvedParams = validation.resolvedValues();
-            } else if (!resolvedParams.isEmpty()) {
-                // Tool has no parameter definitions, but parameters were provided
+        var parameterDefs = tool.parameters();
+        if (!parameterDefs.isEmpty()) {
+            var validation = dev.incusspawn.tool.ParameterResolver.resolve(
+                parameterDefs, resolvedParams);
+            if (validation.hasErrors()) {
                 throw new IllegalArgumentException(
-                    "Tool '" + name + "' does not accept parameters, but received: " + resolvedParams.keySet()
+                    "Error in tool '" + name + "' parameters:\n" +
+                    String.join("\n", validation.errors().stream().map(e -> "  " + e).toList())
                 );
             }
-        } else {
-            // Java ToolSetup implementations don't support parameters
-            if (!resolvedParams.isEmpty()) {
-                throw new IllegalArgumentException(
-                    "Tool '" + name + "' does not accept parameters, but received: " + resolvedParams.keySet()
-                );
+            if (validation.hasWarnings()) {
+                for (var warning : validation.warnings()) {
+                    System.out.println("Warning: " + warning);
+                }
             }
+            resolvedParams = validation.resolvedValues();
+        } else if (!resolvedParams.isEmpty()) {
+            // Tool has no parameter definitions, but parameters were provided
+            throw new IllegalArgumentException(
+                "Tool '" + name + "' does not accept parameters, but received: " + resolvedParams.keySet()
+            );
         }
 
         // Check if tool already resolved - if parameters differ (after resolution), that's an error
@@ -623,16 +615,7 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
      */
     private void runToolSetup(Container container, java.util.List<ResolvedTool> tools) {
         for (var resolved : tools) {
-            // Apply parameter substitution if needed
-            if (resolved.setup() instanceof dev.incusspawn.tool.YamlToolSetup yts
-                    && !resolved.parameters().isEmpty()) {
-                var substitutor = new dev.incusspawn.tool.ParameterSubstitutor(resolved.parameters());
-                var substituted = substitutor.substitute(yts.toolDef());
-                var parameterizedSetup = new dev.incusspawn.tool.YamlToolSetup(substituted);
-                parameterizedSetup.install(container);
-            } else {
-                resolved.setup().install(container);
-            }
+            resolved.setup().install(container, resolved.parameters());
         }
     }
 
