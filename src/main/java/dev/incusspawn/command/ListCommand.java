@@ -1783,16 +1783,18 @@ public class ListCommand implements Runnable {
         addDetailSection(lines, "Packages", allPackages, labelStyle, lineStyle, dimStyle);
 
         // Collect all tools
-        var allTools = new ArrayList<String>();
+        var allToolsFormatted = new ArrayList<String>();
+        var allToolNames = new ArrayList<String>();
         for (var def : chain) {
             for (var toolRef : def.getTools()) {
-                allTools.add(formatToolWithParams(toolRef));
+                allToolsFormatted.add(formatToolWithParams(toolRef));
+                allToolNames.add(toolRef.getName());
             }
         }
-        addDetailSection(lines, "Tools", allTools, labelStyle, lineStyle, dimStyle);
+        addDetailSection(lines, "Tools", allToolsFormatted, labelStyle, lineStyle, dimStyle);
 
         // Collect auto-added dependencies (transitive requires not already in explicit list)
-        var autoDeps = collectAutoDeps(allTools);
+        var autoDeps = collectAutoDeps(allToolNames);
         if (!autoDeps.isEmpty()) {
             addDetailSection(lines, "Dependencies (auto)", autoDeps, labelStyle, lineStyle, dimStyle);
         }
