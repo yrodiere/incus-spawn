@@ -493,18 +493,6 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
     private void resolveWithDeps(String name, Map<String, String> params,
                                   java.util.LinkedHashMap<String, ResolvedTool> resolved,
                                   java.util.LinkedHashSet<String> visiting, java.util.Set<String> explicit) {
-        // Check if tool already resolved - if parameters differ, that's an error
-        if (resolved.containsKey(name)) {
-            var existing = resolved.get(name);
-            if (!existing.parameters().equals(params)) {
-                throw new IllegalArgumentException(
-                    "Tool '" + name + "' specified multiple times with different parameters:\n" +
-                    "  First:  " + existing.parameters() + "\n" +
-                    "  Second: " + params
-                );
-            }
-            return;
-        }
         if (!visiting.add(name)) {
             System.err.println("Warning: dependency cycle detected: " +
                     String.join(" -> ", visiting) + " -> " + name + ", skipping.");
@@ -519,23 +507,42 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
 
         // Resolve parameters and validate
         Map<String, String> resolvedParams = params != null ? params : Map.of();
-        if (tool instanceof dev.incusspawn.tool.YamlToolSetup yts && !yts.toolDef().getParameters().isEmpty()) {
-            var validation = dev.incusspawn.tool.ParameterResolver.resolve(
-                yts.toolDef().getParameters(), resolvedParams);
-            if (validation.hasErrors()) {
-                System.err.println("Error in tool '" + name + "' parameters:");
-                for (var error : validation.errors()) {
-                    System.err.println("  " + error);
+        if (tool instanceof dev.incusspawn.tool.YamlToolSetup yts) {
+            if (!yts.toolDef().getParameters().isEmpty()) {
+                var validation = dev.incusspawn.tool.ParameterResolver.resolve(
+                    yts.toolDef().getParameters(), resolvedParams);
+                if (validation.hasErrors()) {
+                    throw new IllegalArgumentException(
+                        "Error in tool '" + name + "' parameters:\n" +
+                        String.join("\n", validation.errors().stream().map(e -> "  " + e).toList())
+                    );
                 }
-                visiting.remove(name);
-                return;
-            }
-            if (validation.hasWarnings()) {
-                for (var warning : validation.warnings()) {
-                    System.out.println("Warning: " + warning);
+                if (validation.hasWarnings()) {
+                    for (var warning : validation.warnings()) {
+                        System.out.println("Warning: " + warning);
+                    }
                 }
+                resolvedParams = validation.resolvedValues();
+            } else if (!resolvedParams.isEmpty()) {
+                // Tool has no parameter definitions, but parameters were provided
+                throw new IllegalArgumentException(
+                    "Tool '" + name + "' does not accept parameters, but received: " + resolvedParams.keySet()
+                );
             }
-            resolvedParams = validation.resolvedValues();
+        }
+
+        // Check if tool already resolved - if parameters differ (after resolution), that's an error
+        if (resolved.containsKey(name)) {
+            var existing = resolved.get(name);
+            if (!existing.parameters().equals(resolvedParams)) {
+                throw new IllegalArgumentException(
+                    "Tool '" + name + "' specified multiple times with different parameters:\n" +
+                    "  First:  " + existing.parameters() + "\n" +
+                    "  Second: " + resolvedParams
+                );
+            }
+            visiting.remove(name);
+            return;
         }
 
         // Recursively resolve dependencies with their parameters

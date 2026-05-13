@@ -466,7 +466,9 @@ tools:
     mode: "development"
 ```
 
-Parameter values are substituted during tool installation. Use `${param_name}` in tool scripts, environment variables, and file content. Unknown parameters trigger validation errors.
+Parameter values are substituted during tool installation. Use `${param_name}` in tool scripts, environment variables, and file content.
+
+**Validation**: When a tool defines parameters, any unknown or invalid parameters will trigger validation errors. Tools that do not define a `parameters` section will reject any parameters provided to them.
 
 ### Tool Actions
 

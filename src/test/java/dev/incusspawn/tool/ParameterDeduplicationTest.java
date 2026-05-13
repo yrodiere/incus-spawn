@@ -3,21 +3,18 @@ package dev.incusspawn.tool;
 import dev.incusspawn.config.ImageDef;
 import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests that verify parameter handling in tool deduplication scenarios.
- * Note: The actual deduplication and exception throwing happens in
- * BuildCommand.resolveWithDeps() during the build process.
+ * Tool references are parsed from YAML, but deduplication and validation
+ * happens in BuildCommand.resolveWithDeps() during the build process.
  */
 
 class ParameterDeduplicationTest {
 
     @Test
-    void testDuplicateToolWithDifferentParametersWarns() throws Exception {
+    void testDuplicateToolReferencesCanHaveDifferentParameters() throws Exception {
         // Create an image with the same tool specified twice with different parameters
         var yaml = """
             name: test-image
@@ -31,14 +28,13 @@ class ParameterDeduplicationTest {
         var imageDef = ImageDef.parseYaml(yaml);
 
         // Verify both tool references are in the YAML
+        // Note: During build, BuildCommand.resolveWithDeps() will throw
+        // IllegalArgumentException when it detects the parameter conflict
         assertEquals(2, imageDef.getTools().size());
         assertEquals("example-tool", imageDef.getTools().get(0).getName());
         assertEquals("2g", imageDef.getTools().get(0).getParams().get("memory"));
         assertEquals("example-tool", imageDef.getTools().get(1).getName());
         assertEquals("8g", imageDef.getTools().get(1).getParams().get("memory"));
-
-        // Note: The actual warning would be emitted by BuildCommand.resolveWithDeps()
-        // during the build process, not during YAML parsing
     }
 
     @Test
