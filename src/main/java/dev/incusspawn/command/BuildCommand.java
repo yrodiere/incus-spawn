@@ -714,7 +714,8 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
     private void collectToolInstances(ImageDef imageDef, Map<String, BuildSource.ToolInstance> instances) {
         for (var resolvedTool : resolveTools(imageDef)) {
             if (!resolvedTool.parameters().isEmpty()) {
-                instances.put(resolvedTool.name(),
+                // Use putIfAbsent so child parameters win over parent parameters
+                instances.putIfAbsent(resolvedTool.name(),
                     new BuildSource.ToolInstance(resolvedTool.name(), resolvedTool.parameters()));
             }
         }
