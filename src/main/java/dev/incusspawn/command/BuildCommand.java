@@ -529,6 +529,13 @@ public class BuildCommand implements java.util.concurrent.Callable<Integer> {
                     "Tool '" + name + "' does not accept parameters, but received: " + resolvedParams.keySet()
                 );
             }
+        } else {
+            // Java ToolSetup implementations don't support parameters
+            if (!resolvedParams.isEmpty()) {
+                throw new IllegalArgumentException(
+                    "Tool '" + name + "' does not accept parameters, but received: " + resolvedParams.keySet()
+                );
+            }
         }
 
         // Check if tool already resolved - if parameters differ (after resolution), that's an error
