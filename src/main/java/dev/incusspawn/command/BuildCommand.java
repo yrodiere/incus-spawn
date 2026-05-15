@@ -677,7 +677,7 @@ public class BuildCommand implements Callable<Integer> {
                 .assertSuccess("Failed to finalize DNS configuration");
 
         System.out.println("Creating agentuser...");
-        container.exec("useradd", "-m", "-u", "1000", "agentuser")
+        container.exec("useradd", "-m", "-u", "1000", "-G", "systemd-journal", "agentuser")
                 .assertSuccess("Failed to create agentuser");
         container.exec("mkdir", "-p", "/home/agentuser/inbox")
                 .assertSuccess("Failed to create inbox directory");
