@@ -8,6 +8,10 @@ run:
   - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
   - sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
   - ssh-keygen -A
+  # Disable socket activation to avoid conflict with sshd.service. Both sshd.service
+  # and sshd.socket may be enabled (from package install or base image), but they
+  # conflict (both claim port 22). When both are enabled, neither starts on boot.
+  - systemctl disable sshd.socket
   - systemctl enable --now sshd
   - mkdir -p /home/agentuser/.ssh
   - touch /home/agentuser/.ssh/authorized_keys
