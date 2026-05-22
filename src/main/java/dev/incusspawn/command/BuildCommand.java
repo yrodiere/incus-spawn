@@ -679,6 +679,13 @@ public class BuildCommand implements Callable<Integer> {
         System.out.println("Creating agentuser...");
         container.exec("useradd", "-m", "-u", "1000", "-G", "systemd-journal", "agentuser")
                 .assertSuccess("Failed to create agentuser");
+
+        // Allocate subordinate UIDs/GIDs for rootless container support (podman, docker).
+        // On Fedora, these are normally added by setup scripts or when SUB_UID_* is configured
+        // in /etc/login.defs, but minimal container images may lack that configuration.
+        container.exec("usermod", "--add-subuids", "100000-165535", "--add-subgids", "100000-165535", "agentuser")
+                .assertSuccess("Failed to configure subordinate IDs");
+
         container.exec("mkdir", "-p", "/home/agentuser/inbox")
                 .assertSuccess("Failed to create inbox directory");
         container.exec("chown", "agentuser:agentuser", "/home/agentuser/inbox")
