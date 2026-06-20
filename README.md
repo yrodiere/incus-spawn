@@ -536,7 +536,7 @@ Resolution order (later sources override earlier ones with the same name):
 
 ### Why can't I mount a host directory read-write to follow agent work in my IDE?
 
-A project directory is not just data — it is an implicit code execution channel. Build tools, package managers, and IDEs all trust its contents and execute them with your full host privileges. A read-write mount turns the agent's output into unreviewed host-side code execution, which is exactly the threat model incus-spawn exists to prevent.
+Project directories contain files that your build tools and IDE execute automatically — build plugins, git hooks, IDE workspace configs. A read-write mount lets the agent modify these files, which then run on your host with your credentials, full filesystem access, and network access.
 
 Two attack surfaces make this dangerous even for "just the project directory":
 
